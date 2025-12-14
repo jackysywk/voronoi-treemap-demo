@@ -1,0 +1,468 @@
+<!DOCTYPE html>
+<html lang="zh-HK">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>5点 Weighted Voronoi 演示</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            padding: 20px;
+            background: #f5f5f5;
+            margin: 0;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        h1 {
+            text-align: center;
+            color: #333;
+        }
+        canvas {
+            border: 2px solid #333;
+            display: block;
+            margin: 20px auto;
+            background: white;
+            cursor: crosshair;
+        }
+        .controls {
+            display: flex;
+            justify-content: space-around;
+            flex-wrap: wrap;
+            margin: 20px 0;
+            gap: 15px;
+        }
+        .seed-control {
+            background: #f9f9f9;
+            padding: 15px;
+            border-radius: 8px;
+            border: 2px solid #ddd;
+            min-width: 180px;
+        }
+        .seed-control h3 {
+            margin: 0 0 10px 0;
+            font-size: 16px;
+        }
+        .weight-slider {
+            width: 100%;
+            margin: 10px 0;
+        }
+        .weight-value {
+            display: inline-block;
+            width: 50px;
+            text-align: center;
+            font-weight: bold;
+            background: #e3f2fd;
+            padding: 3px 8px;
+            border-radius: 4px;
+        }
+        .buttons {
+            text-align: center;
+            margin: 20px 0;
+        }
+        button {
+            padding: 12px 24px;
+            font-size: 16px;
+            margin: 5px;
+            cursor: pointer;
+            background: #2196F3;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            transition: background 0.3s;
+        }
+        button:hover {
+            background: #1976D2;
+        }
+        button.secondary {
+            background: #4CAF50;
+        }
+        button.secondary:hover {
+            background: #45a049;
+        }
+        .info {
+            background: #e8f5e9;
+            padding: 15px;
+            border-radius: 5px;
+            margin: 20px 0;
+            border-left: 4px solid #4CAF50;
+        }
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 10px;
+            margin: 20px 0;
+        }
+        .stat-item {
+            background: #f5f5f5;
+            padding: 10px;
+            border-radius: 5px;
+            border-left: 3px solid;
+        }
+        .stat-item strong {
+            display: block;
+            margin-bottom: 5px;
+        }
+        .instructions {
+            background: #fff3e0;
+            padding: 15px;
+            border-radius: 5px;
+            margin: 20px 0;
+            border-left: 4px solid #ff9800;
+        }
+        .instructions h3 {
+            margin-top: 0;
+        }
+        .instructions ul {
+            margin: 10px 0;
+            padding-left: 20px;
+        }
+        .instructions li {
+            margin: 5px 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🎯 5点 Weighted Voronoi Diagram (Power Diagram)</h1>
+        
+        <div class="info">
+            <strong>📌 Power Diagram 特性：</strong>
+            <p>• 使用公式：<code>d² = (x-sx)² + (y-sy)² - weight</code></p>
+            <p>• 边界是<strong>直线</strong>（不是曲线！）</p>
+            <p>• 权重越大 → 区域越大</p>
+        </div>
+
+        <canvas id="canvas" width="800" height="600"></canvas>
+
+        <div class="controls" id="controls"></div>
+
+        <div class="buttons">
+            <button onclick="resetSeeds()">🔄 重置位置</button>
+            <button onclick="resetWeights()">⚖️ 重置权重</button>
+            <button class="secondary" onclick="iterateToCentroid()">➡️ 移动到质心（1步）</button>
+            <button class="secondary" onclick="toggleAnimation()">
+                <span id="animText">▶️ 自动收敛</span>
+            </button>
+            <button onclick="randomize()">🎲 随机化</button>
+        </div>
+
+        <div class="stats" id="stats"></div>
+
+        <div class="instructions">
+            <h3>🎮 操作说明：</h3>
+            <ul>
+                <li><strong>拖动滑杆</strong> - 调整各点权重，观察区域大小变化</li>
+                <li><strong>点击画布</strong> - 移动最近的种子点</li>
+                <li><strong>移动到质心</strong> - 执行一步 Lloyd 迭代</li>
+                <li><strong>自动收敛</strong> - 持续迭代直到达到 CVT 状态</li>
+                <li><strong>随机化</strong> - 随机设置权重和位置</li>
+            </ul>
+            <p><strong>💡 试试看：</strong>设置权重比例为 1:2:3:4:5，观察面积是否接近此比例！</p>
+        </div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        const w = canvas.width;
+        const h = canvas.height;
+
+        // 5个种子点，不同颜色
+        const colors = ['#FF6B6B', '#4ECDC4', '#45B7D1', '#FFA07A', '#98D8C8'];
+        let seeds = [
+            { x: 200, y: 200, weight: 50, color: colors[0], name: '种子 1' },
+            { x: 600, y: 200, weight: 50, color: colors[1], name: '种子 2' },
+            { x: 400, y: 400, weight: 50, color: colors[2], name: '种子 3' },
+            { x: 200, y: 500, weight: 50, color: colors[3], name: '种子 4' },
+            { x: 600, y: 500, weight: 50, color: colors[4], name: '种子 5' }
+        ];
+
+        let animating = false;
+        let animationFrame;
+        let draggedSeed = null;
+
+        // Power Distance (使用平方距离)
+        function powerDistance(px, py, seed) {
+            const dx = px - seed.x;
+            const dy = py - seed.y;
+            const distSq = dx * dx + dy * dy;
+            // 把权重乘以更大的系数！
+            return distSq - seed.weight * 500;  // 改成 500 或更大
+        }
+
+        // 找出最近的种子点（Power Distance）
+        function closestSeed(px, py) {
+            let minDist = Infinity;
+            let closest = 0;
+            
+            seeds.forEach((seed, i) => {
+                const dist = powerDistance(px, py, seed);
+                if (dist < minDist) {
+                    minDist = dist;
+                    closest = i;
+                }
+            });
+            
+            return closest;
+        }
+
+        // 创建控制面板
+        function createControls() {
+            const controlsDiv = document.getElementById('controls');
+            controlsDiv.innerHTML = '';
+            
+            seeds.forEach((seed, i) => {
+                const div = document.createElement('div');
+                div.className = 'seed-control';
+                div.style.borderColor = seed.color;
+                div.innerHTML = `
+                    <h3 style="color: ${seed.color}">● ${seed.name}</h3>
+                    <label>
+                        权重: <span class="weight-value" id="weight-${i}">${seed.weight}</span>
+                        <input type="range" class="weight-slider" 
+                               id="slider-${i}" 
+                               min="10" max="150" value="${seed.weight}">
+                    </label>
+                `;
+                controlsDiv.appendChild(div);
+                
+                // 添加事件监听
+                document.getElementById(`slider-${i}`).addEventListener('input', function(e) {
+                    seeds[i].weight = parseInt(e.target.value);
+                    document.getElementById(`weight-${i}`).textContent = e.target.value;
+                    draw();
+                });
+            });
+        }
+
+        // 绘制 Voronoi 图
+        function draw() {
+            ctx.clearRect(0, 0, w, h);
+
+            // 计算面积
+            let areas = new Array(seeds.length).fill(0);
+
+            // 对每个像素点着色
+            const imageData = ctx.createImageData(w, h);
+            
+            for (let y = 0; y < h; y++) {
+                for (let x = 0; x < w; x++) {
+                    const idx = closestSeed(x, y);
+                    areas[idx]++;
+                    
+                    const color = seeds[idx].color;
+                    const rgb = hexToRgb(color);
+                    const i = (y * w + x) * 4;
+                    imageData.data[i] = rgb.r;
+                    imageData.data[i + 1] = rgb.g;
+                    imageData.data[i + 2] = rgb.b;
+                    imageData.data[i + 3] = 120; // 半透明
+                }
+            }
+            
+            ctx.putImageData(imageData, 0, 0);
+
+            // 绘制边界线
+            ctx.strokeStyle = '#000';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            
+            for (let y = 0; y < h - 1; y++) {
+                for (let x = 0; x < w - 1; x++) {
+                    const current = closestSeed(x, y);
+                    const right = closestSeed(x + 1, y);
+                    const down = closestSeed(x, y + 1);
+                    
+                    if (current !== right) {
+                        ctx.moveTo(x + 1, y);
+                        ctx.lineTo(x + 1, y + 1);
+                    }
+                    if (current !== down) {
+                        ctx.moveTo(x, y + 1);
+                        ctx.lineTo(x + 1, y + 1);
+                    }
+                }
+            }
+            ctx.stroke();
+
+            // 绘制种子点
+            seeds.forEach((seed, i) => {
+                // 画圆
+                ctx.fillStyle = seed.color;
+                ctx.beginPath();
+                ctx.arc(seed.x, seed.y, 10, 0, Math.PI * 2);
+                ctx.fill();
+                
+                ctx.strokeStyle = '#000';
+                ctx.lineWidth = 3;
+                ctx.stroke();
+
+                // 标签
+                ctx.fillStyle = '#000';
+                ctx.font = 'bold 12px Arial';
+                ctx.fillText(`${i + 1}`, seed.x - 4, seed.y + 4);
+                
+                // 权重显示
+                ctx.font = 'bold 11px Arial';
+                ctx.fillStyle = seed.color;
+                ctx.fillText(`W=${seed.weight}`, seed.x + 15, seed.y - 15);
+            });
+
+            // 更新统计信息
+            updateStats(areas);
+        }
+
+        // 更新统计
+        function updateStats(areas) {
+            const totalArea = areas.reduce((a, b) => a + b, 0);
+            const statsDiv = document.getElementById('stats');
+            statsDiv.innerHTML = '';
+            
+            seeds.forEach((seed, i) => {
+                const percentage = (areas[i] / totalArea * 100).toFixed(1);
+                const div = document.createElement('div');
+                div.className = 'stat-item';
+                div.style.borderColor = seed.color;
+                div.innerHTML = `
+                    <strong style="color: ${seed.color}">${seed.name}</strong>
+                    权重: ${seed.weight} | 面积: ${areas[i].toLocaleString()} px² (${percentage}%)
+                `;
+                statsDiv.appendChild(div);
+            });
+        }
+
+        // 颜色转换
+        function hexToRgb(hex) {
+            const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+            return result ? {
+                r: parseInt(result[1], 16),
+                g: parseInt(result[2], 16),
+                b: parseInt(result[3], 16)
+            } : { r: 0, g: 0, b: 0 };
+        }
+
+        // 滑鼠事件
+        canvas.addEventListener('mousedown', function(e) {
+            const rect = canvas.getBoundingClientRect();
+            const x = e.clientX - rect.left;
+            const y = e.clientY - rect.top;
+            
+            // 找最近的种子点
+            let minDist = Infinity;
+            seeds.forEach((seed, i) => {
+                const dist = Math.sqrt((x - seed.x) ** 2 + (y - seed.y) ** 2);
+                if (dist < minDist && dist < 30) {
+                    minDist = dist;
+                    draggedSeed = i;
+                }
+            });
+        });
+
+        canvas.addEventListener('mousemove', function(e) {
+            if (draggedSeed !== null) {
+                const rect = canvas.getBoundingClientRect();
+                const x = Math.max(10, Math.min(w - 10, e.clientX - rect.left));
+                const y = Math.max(10, Math.min(h - 10, e.clientY - rect.top));
+                
+                seeds[draggedSeed].x = x;
+                seeds[draggedSeed].y = y;
+                draw();
+            }
+        });
+
+        canvas.addEventListener('mouseup', function() {
+            draggedSeed = null;
+        });
+
+        // 重置函数
+        function resetSeeds() {
+            seeds[0].x = 200; seeds[0].y = 200;
+            seeds[1].x = 600; seeds[1].y = 200;
+            seeds[2].x = 400; seeds[2].y = 400;
+            seeds[3].x = 200; seeds[3].y = 500;
+            seeds[4].x = 600; seeds[4].y = 500;
+            draw();
+        }
+
+        function resetWeights() {
+            seeds.forEach((seed, i) => {
+                seed.weight = 50;
+                document.getElementById(`slider-${i}`).value = 50;
+                document.getElementById(`weight-${i}`).textContent = 50;
+            });
+            draw();
+        }
+
+        function randomize() {
+            seeds.forEach((seed, i) => {
+                seed.x = 100 + Math.random() * (w - 200);
+                seed.y = 100 + Math.random() * (h - 200);
+                seed.weight = 30 + Math.floor(Math.random() * 100);
+                document.getElementById(`slider-${i}`).value = seed.weight;
+                document.getElementById(`weight-${i}`).textContent = seed.weight;
+            });
+            draw();
+        }
+
+        // 移动到质心
+        function iterateToCentroid() {
+            let centroids = seeds.map(() => ({ x: 0, y: 0, count: 0 }));
+
+            // 计算质心
+            for (let y = 0; y < h; y += 2) {
+                for (let x = 0; x < w; x += 2) {
+                    const idx = closestSeed(x, y);
+                    centroids[idx].x += x;
+                    centroids[idx].y += y;
+                    centroids[idx].count++;
+                }
+            }
+
+            // 移动种子点
+            seeds.forEach((seed, i) => {
+                if (centroids[i].count > 0) {
+                    const targetX = centroids[i].x / centroids[i].count;
+                    const targetY = centroids[i].y / centroids[i].count;
+                    
+                    seed.x += (targetX - seed.x) * 0.3;
+                    seed.y += (targetY - seed.y) * 0.3;
+                }
+            });
+
+            draw();
+        }
+
+        // 动画
+        function animate() {
+            iterateToCentroid();
+            
+            if (animating) {
+                animationFrame = requestAnimationFrame(animate);
+            }
+        }
+
+        function toggleAnimation() {
+            animating = !animating;
+            const btn = document.getElementById('animText');
+            
+            if (animating) {
+                btn.textContent = '⏸️ 停止';
+                animate();
+            } else {
+                btn.textContent = '▶️ 自动收敛';
+                cancelAnimationFrame(animationFrame);
+            }
+        }
+
+        // 初始化
+        createControls();
+        draw();
+    </script>
+</body>
+</html>
