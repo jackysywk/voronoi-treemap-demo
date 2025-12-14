@@ -4,6 +4,9 @@
 
 这是一个为**香港大学计算机科学硕士项目 (MSc Computer Science)** 的 **COMP7507 Visualization & Visual Analytics** 课程设计的 **Weighted Voronoi Diagram (Power Diagram)** 交互式可视化工具。
 
+## 使用方法
+https://jackysywk.github.io/voronoi-treemap-demo/
+
 通过直观的图形界面，帮助同学们理解：
 - 🎨 Weighted Voronoi Diagram 的几何特性
 - ⚖️ 权重对区域划分的影响
